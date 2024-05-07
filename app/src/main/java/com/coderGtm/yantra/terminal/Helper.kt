@@ -24,6 +24,7 @@ import com.coderGtm.yantra.models.Alias
 import com.coderGtm.yantra.models.Theme
 import com.coderGtm.yantra.requestCmdInputFocusAndShowKeyboard
 import com.coderGtm.yantra.setSystemWallpaper
+import com.coderGtm.yantra.toast
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
 import java.util.regex.Pattern
@@ -449,6 +450,20 @@ fun showSuggestions(
                 isPrimary = false
                 executeOnTapViable = false
             }
+            else if (effectivePrimaryCmd == "time") {
+                if (args.size > 1) {
+                    overrideLastWord = true
+                }
+                val regex = Regex(Pattern.quote(input.removePrefix(args[0]).trim()), RegexOption.IGNORE_CASE)
+                val timeArgs= listOf("utc")
+                for (arg in timeArgs) {
+                    if (regex.containsMatchIn(arg)) {
+                        suggestions.add(arg)
+                    }
+                }
+                isPrimary = false
+                executeOnTapViable = false
+            }
             else if (effectivePrimaryCmd == "run") {
                 try {
                     val scripts = getScripts(terminal.preferenceObject)
@@ -491,22 +506,24 @@ fun showSuggestions(
 
 
             btn.setOnClickListener {
-                if (overrideLastWord) {
-                    val newCmd = input.substring(0, input.length-args[args.size-1].length) + sug + " "
-                    terminal.binding.cmdInput.setText(newCmd)
+                val newCmd = if (overrideLastWord) {
+                    input.substring(0, input.length-args[args.size-1].length) + sug + " "
                 }
                 else {
-                    terminal.binding.cmdInput.setText("$input $sug ")
+                    "$input $sug "
                 }
-                terminal.binding.cmdInput.setSelection(terminal.binding.cmdInput.text!!.length)
-                requestCmdInputFocusAndShowKeyboard(terminal.activity, terminal.binding)
-                terminal.binding.suggestionsTab.removeView(it)
-
                 val actOnSuggestionTap = terminal.preferenceObject.getBoolean("actOnSuggestionTap", false)
                 if (!isPrimary && actOnSuggestionTap && executeOnTapViable) {
-                    terminal.handleCommand(terminal.binding.cmdInput.text.toString().trim())
+                    terminal.handleCommand(newCmd)
                     terminal.binding.cmdInput.setText("")
                 }
+                else {
+                    terminal.binding.cmdInput.setText(newCmd)
+                    terminal.binding.cmdInput.setSelection(terminal.binding.cmdInput.text!!.length)
+                    requestCmdInputFocusAndShowKeyboard(terminal.activity, terminal.binding)
+                    terminal.binding.suggestionsTab.removeView(it)
+                }
+
             }
             if (isPrimary) {
                 btn.setOnLongClickListener {
@@ -529,6 +546,45 @@ fun showSuggestions(
             }
             terminal.activity.runOnUiThread {
                 terminal.binding.suggestionsTab.addView(btn)
+            }
+        }
+        if (suggestions.size == 1 && !isPrimary && terminal.preferenceObject.getBoolean("actOnLastSecondarySuggestion", false)) {
+            // auto execute if only one suggestion
+            val effectivePrimaryCmd: String
+            val isAliasCmd = terminal.aliasList.any { it.key == args[0] }
+            effectivePrimaryCmd = if (isAliasCmd) {
+                terminal.aliasList.first { it.key == args[0] }.value
+            } else {
+                args[0].lowercase()
+            }
+            // dont auto execute for some commands
+            if (effectivePrimaryCmd == "call" || effectivePrimaryCmd == "time") {
+                return@Thread
+            }
+            // dont auto execute if only flag suggestion
+            if (suggestions[0].startsWith("-")) {
+                return@Thread
+            }
+            // dont auto execute if no input after primary command
+            if (args.size == 1) {
+                return@Thread
+            }
+
+            terminal.activity.runOnUiThread {
+                terminal.output(terminal.activity.getString(R.string.auto_executing_suggestion), terminal.theme.successTextColor, Typeface.ITALIC)
+
+                val sug = suggestions.first()
+                val newCmd = if (overrideLastWord) {
+                    input.substring(0, input.length-args[args.size-1].length) + sug + " "
+                }
+                else {
+                    "$input $sug "
+                }
+                terminal.handleCommand(newCmd)
+                terminal.binding.suggestionsTab.removeAllViews()
+                suggestions.clear()
+
+                terminal.binding.cmdInput.setText("")
             }
         }
     }.start()
